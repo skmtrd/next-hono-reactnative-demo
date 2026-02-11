@@ -146,7 +146,7 @@ app.openapi(helloRoute, (c) => {
   return c.json({
     message: 'Hello from Hono!',
     timestamp: new Date().toISOString()
-  })
+  }, 200)
 })
 
 const greetRoute = createRoute({
@@ -170,7 +170,7 @@ app.openapi(greetRoute, async (c) => {
   return c.json({
     message: `Hello, ${name}!`,
     timestamp: new Date().toISOString()
-  })
+  }, 200)
 })
 
 // --- 認証API ---
@@ -212,7 +212,7 @@ app.openapi(signupRoute, async (c) => {
       refresh_token: data.session.refresh_token,
       expires_at: data.session.expires_at ?? null,
     } : null,
-  })
+  }, 200)
 })
 
 const loginRoute = createRoute({
@@ -252,7 +252,7 @@ app.openapi(loginRoute, async (c) => {
       refresh_token: data.session.refresh_token,
       expires_at: data.session.expires_at ?? null,
     },
-  })
+  }, 200)
 })
 
 // --- 保護されたAPI ---
@@ -287,7 +287,7 @@ app.openapi(protectedMeRoute, async (c) => {
     message: 'You are authenticated!',
     user,
     timestamp: new Date().toISOString()
-  })
+  }, 200)
 })
 
 const protectedDataRoute = createRoute({
@@ -323,7 +323,7 @@ app.openapi(protectedDataRoute, async (c) => {
       items: ['item1', 'item2', 'item3']
     },
     timestamp: new Date().toISOString()
-  })
+  }, 200)
 })
 
 // --- プロフィールAPI ---
@@ -369,7 +369,7 @@ app.openapi(getProfileRoute, async (c) => {
     return c.json({ error: error.message }, 400)
   }
 
-  return c.json({ profile: data })
+  return c.json({ profile: data }, 200)
 })
 
 const updateProfileRoute = createRoute({
@@ -421,7 +421,7 @@ app.openapi(updateProfileRoute, async (c) => {
   return c.json({
     message: 'Profile updated successfully',
     profile: data,
-  })
+  }, 200)
 })
 
 // --- OpenAPI ドキュメント ---
