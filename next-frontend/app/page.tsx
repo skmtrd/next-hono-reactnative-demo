@@ -92,6 +92,27 @@ export default function Home() {
     setApiLoading(false)
   }
 
+  // プロフィール取得（ログインしていなくてもリクエスト可能）
+  const fetchProfile = async () => {
+    setApiLoading(true)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const headers: Record<string, string> = {}
+      
+      // ログインしている場合のみトークンを付与
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`
+      }
+      
+      const res = await fetch(`${API_BASE}/api/profile`, { headers })
+      const data = await res.json()
+      setProtectedResponse(JSON.stringify(data, null, 2))
+    } catch (error) {
+      setProtectedResponse(`Error: ${error}`)
+    }
+    setApiLoading(false)
+  }
+
   if (loading) {
     return (
       <main style={styles.main}>
@@ -109,9 +130,14 @@ export default function Home() {
         {user ? (
           <div style={styles.userInfo}>
             <span style={styles.userEmail}>ログイン中: {user.email}</span>
-            <button onClick={handleLogout} style={styles.logoutButton}>
-              ログアウト
-            </button>
+            <div style={styles.userActions}>
+              <Link href="/profile" style={styles.profileLink}>
+                プロフィール編集
+              </Link>
+              <button onClick={handleLogout} style={styles.logoutButton}>
+                ログアウト
+              </button>
+            </div>
           </div>
         ) : (
           <div style={styles.userInfo}>
@@ -149,6 +175,9 @@ export default function Home() {
           </button>
           <button onClick={fetchSecretData} disabled={apiLoading} style={styles.button}>
             GET /api/protected/data
+          </button>
+          <button onClick={fetchProfile} disabled={apiLoading} style={{...styles.button, backgroundColor: '#28a745'}}>
+            GET /api/profile
           </button>
         </div>
         
@@ -193,6 +222,19 @@ const styles: { [key: string]: React.CSSProperties } = {
   userEmail: {
     fontWeight: 500,
     color: '#0070f3',
+  },
+  userActions: {
+    display: 'flex',
+    gap: '8px',
+    alignItems: 'center',
+  },
+  profileLink: {
+    backgroundColor: '#28a745',
+    color: 'white',
+    padding: '8px 16px',
+    borderRadius: '5px',
+    textDecoration: 'none',
+    fontSize: '0.875rem',
   },
   logoutButton: {
     backgroundColor: '#dc3545',

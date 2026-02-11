@@ -221,6 +221,67 @@ app.get('/api/protected/data', authMiddleware, (c) => {
   })
 })
 
+// === プロフィール API ===
+
+// ヘルパー関数: 認証済みSupabaseクライアントを作成
+const createAuthenticatedClient = (c: any) => {
+  const authHeader = c.req.header('Authorization')
+  const token = authHeader?.replace('Bearer ', '') || ''
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  })
+}
+
+// プロフィール取得（認証必須）
+app.get('/api/profile', authMiddleware, async (c) => {
+  const user = c.get('user')
+  const supabase = createAuthenticatedClient(c)
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user?.id)
+    .single()
+
+  if (error) {
+    return c.json({ error: error.message }, 400)
+  }
+
+  return c.json({
+    profile: data,
+  })
+})
+
+// プロフィール更新（認証必須）
+app.put('/api/profile', authMiddleware, async (c) => {
+  const user = c.get('user')
+  const supabase = createAuthenticatedClient(c)
+
+  try {
+    const { name, bio } = await c.req.json<{ name?: string; bio?: string }>()
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ name, bio })
+      .eq('id', user?.id)
+      .select()
+      .single()
+
+    if (error) {
+      return c.json({ error: error.message }, 400)
+    }
+
+    return c.json({
+      message: 'Profile updated successfully',
+      profile: data,
+    })
+  } catch (error) {
+    return c.json({ error: 'Invalid request body' }, 400)
+  }
+})
+
 const port = 8787
 const hostname = '0.0.0.0'  // 外部からのアクセスを許可
 console.log(`🔥 Hono server is running on http://${hostname}:${port}`)
