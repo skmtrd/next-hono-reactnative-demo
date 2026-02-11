@@ -2,10 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { client, createAuthHeaders } from '@/lib/api-client'
 import { User } from '@supabase/supabase-js'
 import Link from 'next/link'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
@@ -41,74 +40,77 @@ export default function Home() {
   const fetchHello = async () => {
     setApiLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/api/hello`)
-      const data = await res.json()
-      setHelloResponse(JSON.stringify(data, null, 2))
-    } catch (error) {
-      setHelloResponse(`Error: ${error}`)
+      const { data, error } = await client.GET('/api/hello')
+      if (error) {
+        setHelloResponse(JSON.stringify(error, null, 2))
+      } else {
+        setHelloResponse(JSON.stringify(data, null, 2))
+      }
+    } catch (err) {
+      setHelloResponse(`Error: ${err}`)
     }
     setApiLoading(false)
   }
 
-  // 保護されたAPI呼び出し（ログインしていなくてもリクエスト可能）
+  // 保護されたAPI呼び出し
   const fetchProtectedData = async () => {
     setApiLoading(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const headers: Record<string, string> = {}
+      const headers = session?.access_token 
+        ? createAuthHeaders(session.access_token)
+        : {}
       
-      // ログインしている場合のみトークンを付与
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`
+      const { data, error } = await client.GET('/api/protected/me', { headers })
+      if (error) {
+        setProtectedResponse(JSON.stringify(error, null, 2))
+      } else {
+        setProtectedResponse(JSON.stringify(data, null, 2))
       }
-      
-      const res = await fetch(`${API_BASE}/api/protected/me`, { headers })
-      const data = await res.json()
-      setProtectedResponse(JSON.stringify(data, null, 2))
-    } catch (error) {
-      setProtectedResponse(`Error: ${error}`)
+    } catch (err) {
+      setProtectedResponse(`Error: ${err}`)
     }
     setApiLoading(false)
   }
 
-  // 保護されたデータ取得（ログインしていなくてもリクエスト可能）
+  // 保護されたデータ取得
   const fetchSecretData = async () => {
     setApiLoading(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const headers: Record<string, string> = {}
+      const headers = session?.access_token 
+        ? createAuthHeaders(session.access_token)
+        : {}
       
-      // ログインしている場合のみトークンを付与
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`
+      const { data, error } = await client.GET('/api/protected/data', { headers })
+      if (error) {
+        setProtectedResponse(JSON.stringify(error, null, 2))
+      } else {
+        setProtectedResponse(JSON.stringify(data, null, 2))
       }
-      
-      const res = await fetch(`${API_BASE}/api/protected/data`, { headers })
-      const data = await res.json()
-      setProtectedResponse(JSON.stringify(data, null, 2))
-    } catch (error) {
-      setProtectedResponse(`Error: ${error}`)
+    } catch (err) {
+      setProtectedResponse(`Error: ${err}`)
     }
     setApiLoading(false)
   }
 
-  // プロフィール取得（ログインしていなくてもリクエスト可能）
+  // プロフィール取得
   const fetchProfile = async () => {
     setApiLoading(true)
     try {
       const { data: { session } } = await supabase.auth.getSession()
-      const headers: Record<string, string> = {}
+      const headers = session?.access_token 
+        ? createAuthHeaders(session.access_token)
+        : {}
       
-      // ログインしている場合のみトークンを付与
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`
+      const { data, error } = await client.GET('/api/profile', { headers })
+      if (error) {
+        setProtectedResponse(JSON.stringify(error, null, 2))
+      } else {
+        setProtectedResponse(JSON.stringify(data, null, 2))
       }
-      
-      const res = await fetch(`${API_BASE}/api/profile`, { headers })
-      const data = await res.json()
-      setProtectedResponse(JSON.stringify(data, null, 2))
-    } catch (error) {
-      setProtectedResponse(`Error: ${error}`)
+    } catch (err) {
+      setProtectedResponse(`Error: ${err}`)
     }
     setApiLoading(false)
   }
@@ -190,6 +192,13 @@ export default function Home() {
         {protectedResponse && (
           <pre style={styles.response}>{protectedResponse}</pre>
         )}
+      </section>
+
+      {/* API ドキュメント */}
+      <section style={styles.docsSection}>
+        <a href="http://localhost:8787/docs" target="_blank" rel="noopener noreferrer" style={styles.docsLink}>
+          📚 Swagger UI でAPIドキュメントを確認
+        </a>
       </section>
     </main>
   )
@@ -287,12 +296,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     overflow: 'auto',
     fontSize: '0.875rem',
   },
-  warning: {
-    color: '#856404',
-    backgroundColor: '#fff3cd',
-    padding: '12px',
-    borderRadius: '5px',
-  },
   notLoggedIn: {
     color: '#dc3545',
     fontWeight: 500,
@@ -302,5 +305,14 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '0.8rem',
     marginTop: '12px',
     fontStyle: 'italic',
+  },
+  docsSection: {
+    textAlign: 'center',
+    marginTop: '20px',
+  },
+  docsLink: {
+    color: '#0070f3',
+    textDecoration: 'none',
+    fontSize: '0.9rem',
   },
 }

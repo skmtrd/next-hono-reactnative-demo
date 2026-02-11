@@ -2,9 +2,8 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { client } from '@/lib/api-client'
 import { useRouter } from 'next/navigation'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
 export default function AuthPage() {
   const [email, setEmail] = useState('')
@@ -23,48 +22,58 @@ export default function AuthPage() {
     setApiResponse(null)
 
     try {
-      // Hono API経由で認証
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup'
-      const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
-
-      const data = await res.json()
-      setApiResponse(JSON.stringify(data, null, 2))
-
-      if (!res.ok) {
-        throw new Error(data.error || 'エラーが発生しました')
-      }
-
-      if (isLogin && data.session) {
-        // Hono APIから受け取ったセッションをSupabaseクライアントに設定
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token,
+      if (isLogin) {
+        // ログイン
+        const { data, error } = await client.POST('/api/auth/login', {
+          body: { email, password },
         })
-        
-        setMessage({
-          type: 'success',
-          text: 'ログインしました！リダイレクト中...',
-        })
-        
-        setTimeout(() => {
-          router.push('/')
-          router.refresh()
-        }, 1000)
+
+        setApiResponse(JSON.stringify(data || error, null, 2))
+
+        if (error) {
+          throw new Error((error as { error?: string }).error || 'エラーが発生しました')
+        }
+
+        if (data?.session) {
+          // Hono APIから受け取ったセッションをSupabaseクライアントに設定
+          await supabase.auth.setSession({
+            access_token: data.session.access_token,
+            refresh_token: data.session.refresh_token,
+          })
+          
+          setMessage({
+            type: 'success',
+            text: 'ログインしました！リダイレクト中...',
+          })
+          
+          setTimeout(() => {
+            router.push('/')
+            router.refresh()
+          }, 1000)
+        }
       } else {
+        // サインアップ
+        const { data, error } = await client.POST('/api/auth/signup', {
+          body: { email, password },
+        })
+
+        setApiResponse(JSON.stringify(data || error, null, 2))
+
+        if (error) {
+          throw new Error((error as { error?: string }).error || 'エラーが発生しました')
+        }
+
         setMessage({
           type: 'success',
           text: 'アカウントを作成しました。ログインしてください。',
         })
         setIsLogin(true)
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'エラーが発生しました'
       setMessage({
         type: 'error',
-        text: error.message || 'エラーが発生しました',
+        text: errorMessage,
       })
     } finally {
       setLoading(false)

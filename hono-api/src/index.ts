@@ -1,8 +1,9 @@
 import 'dotenv/config'
 import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
+import { OpenAPIHono, createRoute, z } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
 import { createClient } from '@supabase/supabase-js'
+import { swaggerUI } from '@hono/swagger-ui'
 
 // 環境変数
 const SUPABASE_URL = process.env.SUPABASE_URL || 'http://127.0.0.1:54321'
@@ -10,197 +11,278 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || ''
 
 // 型定義
 type Variables = {
-  user: {
-    id: string
-    email: string
-  } | null
+  user: { id: string; email: string } | null
 }
 
-const app = new Hono<{ Variables: Variables }>()
+// ヘルパー関数
+const createAuthenticatedClient = (authHeader: string | undefined) => {
+  const token = authHeader?.replace('Bearer ', '') || ''
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  })
+}
 
-// CORSを有効化（開発環境では全てのオリジンを許可）
+const verifyAuth = async (authHeader: string | undefined) => {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { user: null, error: 'Missing or invalid authorization header' }
+  }
+  const token = authHeader.replace('Bearer ', '')
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: `Bearer ${token}` } }
+  })
+  const { data: { user }, error } = await supabase.auth.getUser()
+  if (error || !user) {
+    return { user: null, error: 'Invalid or expired token' }
+  }
+  return { user: { id: user.id, email: user.email || '' }, error: null }
+}
+
+// ===== スキーマ定義 =====
+
+const ErrorSchema = z.object({
+  error: z.string()
+}).openapi('Error')
+
+const HelloResponseSchema = z.object({
+  message: z.string(),
+  timestamp: z.string()
+}).openapi('HelloResponse')
+
+const GreetRequestSchema = z.object({
+  name: z.string()
+}).openapi('GreetRequest')
+
+const GreetResponseSchema = z.object({
+  message: z.string(),
+  timestamp: z.string()
+}).openapi('GreetResponse')
+
+const AuthRequestSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6)
+}).openapi('AuthRequest')
+
+const UserSchema = z.object({
+  id: z.string(),
+  email: z.string().nullable()
+}).openapi('User')
+
+const SessionSchema = z.object({
+  access_token: z.string(),
+  refresh_token: z.string(),
+  expires_at: z.number().nullable()
+}).openapi('Session')
+
+const AuthResponseSchema = z.object({
+  message: z.string(),
+  user: UserSchema.nullable(),
+  session: SessionSchema.nullable()
+}).openapi('AuthResponse')
+
+const ProtectedMeResponseSchema = z.object({
+  message: z.string(),
+  user: UserSchema.nullable(),
+  timestamp: z.string()
+}).openapi('ProtectedMeResponse')
+
+const ProtectedDataResponseSchema = z.object({
+  message: z.string(),
+  data: z.object({
+    secretMessage: z.string(),
+    items: z.array(z.string())
+  }),
+  timestamp: z.string()
+}).openapi('ProtectedDataResponse')
+
+const ProfileSchema = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  bio: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string()
+}).openapi('Profile')
+
+const ProfileResponseSchema = z.object({
+  profile: ProfileSchema
+}).openapi('ProfileResponse')
+
+const ProfileUpdateRequestSchema = z.object({
+  name: z.string().optional(),
+  bio: z.string().optional()
+}).openapi('ProfileUpdateRequest')
+
+const ProfileUpdateResponseSchema = z.object({
+  message: z.string(),
+  profile: ProfileSchema
+}).openapi('ProfileUpdateResponse')
+
+// ===== ルート定義 =====
+
+const app = new OpenAPIHono<{ Variables: Variables }>()
+
+// CORS
 app.use('/*', cors({
-  origin: '*',  // 本番環境では特定のオリジンのみ許可すること
+  origin: '*',
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowHeaders: ['Content-Type', 'Authorization'],
 }))
 
-// 認証ミドルウェア（保護されたルート用）
-const authMiddleware = async (c: any, next: any) => {
-  const authHeader = c.req.header('Authorization')
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ error: 'Missing or invalid authorization header' }, 401)
-  }
+// --- 公開API ---
 
-  const token = authHeader.replace('Bearer ', '')
-
-  // Supabaseクライアントを作成してトークンを検証
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: { Authorization: `Bearer ${token}` }
+const helloRoute = createRoute({
+  method: 'get',
+  path: '/api/hello',
+  tags: ['Public'],
+  summary: 'Hello エンドポイント',
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: HelloResponseSchema } }
     }
-  })
-
-  const { data: { user }, error } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    return c.json({ error: 'Invalid or expired token' }, 401)
   }
-
-  // ユーザー情報をコンテキストに設定
-  c.set('user', {
-    id: user.id,
-    email: user.email || ''
-  })
-
-  await next()
-}
-
-// ルートエンドポイント（公開）
-app.get('/', (c) => {
-  return c.json({ message: 'Hono API Server is running!' })
 })
 
-// サンプルAPIエンドポイント（公開）
-app.get('/api/hello', (c) => {
+app.openapi(helloRoute, (c) => {
   return c.json({
     message: 'Hello from Hono!',
     timestamp: new Date().toISOString()
   })
 })
 
-// POSTリクエストのサンプル（公開）
-app.post('/api/greet', async (c) => {
-  const body = await c.req.json<{ name: string }>()
+const greetRoute = createRoute({
+  method: 'post',
+  path: '/api/greet',
+  tags: ['Public'],
+  summary: '挨拶エンドポイント',
+  request: {
+    body: { content: { 'application/json': { schema: GreetRequestSchema } } }
+  },
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: GreetResponseSchema } }
+    }
+  }
+})
+
+app.openapi(greetRoute, async (c) => {
+  const { name } = c.req.valid('json')
   return c.json({
-    message: `Hello, ${body.name}!`,
+    message: `Hello, ${name}!`,
     timestamp: new Date().toISOString()
   })
 })
 
-// === 認証エンドポイント ===
+// --- 認証API ---
 
-// サインアップ（アカウント作成）
-app.post('/api/auth/signup', async (c) => {
-  try {
-    const { email, password } = await c.req.json<{ email: string; password: string }>()
-
-    if (!email || !password) {
-      return c.json({ error: 'Email and password are required' }, 400)
+const signupRoute = createRoute({
+  method: 'post',
+  path: '/api/auth/signup',
+  tags: ['Auth'],
+  summary: 'アカウント作成',
+  request: {
+    body: { content: { 'application/json': { schema: AuthRequestSchema } } }
+  },
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: AuthResponseSchema } }
+    },
+    400: {
+      description: 'エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
     }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    const { data, error } = await supabase.auth.signUp({ email, password })
-
-    if (error) {
-      return c.json({ error: error.message }, 400)
-    }
-
-    return c.json({
-      message: 'Account created successfully',
-      user: data.user ? {
-        id: data.user.id,
-        email: data.user.email,
-      } : null,
-      session: data.session ? {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        expires_at: data.session.expires_at,
-      } : null,
-    })
-  } catch (error) {
-    return c.json({ error: 'Invalid request body' }, 400)
   }
 })
 
-// ログイン
-app.post('/api/auth/login', async (c) => {
-  try {
-    const { email, password } = await c.req.json<{ email: string; password: string }>()
-
-    if (!email || !password) {
-      return c.json({ error: 'Email and password are required' }, 400)
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-
-    if (error) {
-      return c.json({ error: error.message }, 401)
-    }
-
-    return c.json({
-      message: 'Login successful',
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-      },
-      session: {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        expires_at: data.session.expires_at,
-      },
-    })
-  } catch (error) {
-    return c.json({ error: 'Invalid request body' }, 400)
-  }
-})
-
-// トークンリフレッシュ
-app.post('/api/auth/refresh', async (c) => {
-  try {
-    const { refresh_token } = await c.req.json<{ refresh_token: string }>()
-
-    if (!refresh_token) {
-      return c.json({ error: 'Refresh token is required' }, 400)
-    }
-
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-    const { data, error } = await supabase.auth.refreshSession({ refresh_token })
-
-    if (error) {
-      return c.json({ error: error.message }, 401)
-    }
-
-    return c.json({
-      message: 'Token refreshed successfully',
-      session: data.session ? {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        expires_at: data.session.expires_at,
-      } : null,
-    })
-  } catch (error) {
-    return c.json({ error: 'Invalid request body' }, 400)
-  }
-})
-
-// ログアウト（認証必須）
-app.post('/api/auth/logout', authMiddleware, async (c) => {
-  const authHeader = c.req.header('Authorization')
-  const token = authHeader?.replace('Bearer ', '') || ''
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: { Authorization: `Bearer ${token}` }
-    }
-  })
-
-  const { error } = await supabase.auth.signOut()
+app.openapi(signupRoute, async (c) => {
+  const { email, password } = c.req.valid('json')
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  const { data, error } = await supabase.auth.signUp({ email, password })
 
   if (error) {
     return c.json({ error: error.message }, 400)
   }
 
-  return c.json({ message: 'Logout successful' })
+  return c.json({
+    message: 'Account created successfully',
+    user: data.user ? { id: data.user.id, email: data.user.email ?? null } : null,
+    session: data.session ? {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at: data.session.expires_at ?? null,
+    } : null,
+  })
 })
 
-// === 保護されたエンドポイント ===
+const loginRoute = createRoute({
+  method: 'post',
+  path: '/api/auth/login',
+  tags: ['Auth'],
+  summary: 'ログイン',
+  request: {
+    body: { content: { 'application/json': { schema: AuthRequestSchema } } }
+  },
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: AuthResponseSchema } }
+    },
+    401: {
+      description: '認証エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    }
+  }
+})
 
-// ユーザー情報取得（認証必須）
-app.get('/api/protected/me', authMiddleware, (c) => {
-  const user = c.get('user')
+app.openapi(loginRoute, async (c) => {
+  const { email, password } = c.req.valid('json')
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+  if (error) {
+    return c.json({ error: error.message }, 401)
+  }
+
+  return c.json({
+    message: 'Login successful',
+    user: { id: data.user.id, email: data.user.email ?? null },
+    session: {
+      access_token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at: data.session.expires_at ?? null,
+    },
+  })
+})
+
+// --- 保護されたAPI ---
+
+const protectedMeRoute = createRoute({
+  method: 'get',
+  path: '/api/protected/me',
+  tags: ['Protected'],
+  summary: 'ユーザー情報取得（認証必須）',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: ProtectedMeResponseSchema } }
+    },
+    401: {
+      description: '認証エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    }
+  }
+})
+
+app.openapi(protectedMeRoute, async (c) => {
+  const authHeader = c.req.header('Authorization')
+  const { user, error: authError } = await verifyAuth(authHeader)
+  
+  if (authError || !user) {
+    return c.json({ error: authError || 'Unauthorized' }, 401)
+  }
+
   return c.json({
     message: 'You are authenticated!',
     user,
@@ -208,41 +290,128 @@ app.get('/api/protected/me', authMiddleware, (c) => {
   })
 })
 
-// 保護されたデータ取得（認証必須）
-app.get('/api/protected/data', authMiddleware, (c) => {
-  const user = c.get('user')
+const protectedDataRoute = createRoute({
+  method: 'get',
+  path: '/api/protected/data',
+  tags: ['Protected'],
+  summary: '保護されたデータ取得（認証必須）',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: ProtectedDataResponseSchema } }
+    },
+    401: {
+      description: '認証エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    }
+  }
+})
+
+app.openapi(protectedDataRoute, async (c) => {
+  const authHeader = c.req.header('Authorization')
+  const { user, error: authError } = await verifyAuth(authHeader)
+  
+  if (authError || !user) {
+    return c.json({ error: authError || 'Unauthorized' }, 401)
+  }
+
   return c.json({
     message: 'This is protected data',
     data: {
-      secretMessage: `Hello ${user?.email}, this is your secret data!`,
+      secretMessage: `Hello ${user.email}, this is your secret data!`,
       items: ['item1', 'item2', 'item3']
     },
     timestamp: new Date().toISOString()
   })
 })
 
-// === プロフィール API ===
+// --- プロフィールAPI ---
 
-// ヘルパー関数: 認証済みSupabaseクライアントを作成
-const createAuthenticatedClient = (c: any) => {
-  const authHeader = c.req.header('Authorization')
-  const token = authHeader?.replace('Bearer ', '') || ''
-  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: { Authorization: `Bearer ${token}` }
+const getProfileRoute = createRoute({
+  method: 'get',
+  path: '/api/profile',
+  tags: ['Profile'],
+  summary: 'プロフィール取得（認証必須）',
+  security: [{ Bearer: [] }],
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: ProfileResponseSchema } }
+    },
+    401: {
+      description: '認証エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    },
+    400: {
+      description: 'エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
     }
-  })
-}
+  }
+})
 
-// プロフィール取得（認証必須）
-app.get('/api/profile', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const supabase = createAuthenticatedClient(c)
+app.openapi(getProfileRoute, async (c) => {
+  const authHeader = c.req.header('Authorization')
+  const { user, error: authError } = await verifyAuth(authHeader)
+  
+  if (authError || !user) {
+    return c.json({ error: authError || 'Unauthorized' }, 401)
+  }
 
+  const supabase = createAuthenticatedClient(authHeader)
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .eq('id', user?.id)
+    .eq('id', user.id)
+    .single()
+
+  if (error) {
+    return c.json({ error: error.message }, 400)
+  }
+
+  return c.json({ profile: data })
+})
+
+const updateProfileRoute = createRoute({
+  method: 'put',
+  path: '/api/profile',
+  tags: ['Profile'],
+  summary: 'プロフィール更新（認証必須）',
+  security: [{ Bearer: [] }],
+  request: {
+    body: { content: { 'application/json': { schema: ProfileUpdateRequestSchema } } }
+  },
+  responses: {
+    200: {
+      description: '成功',
+      content: { 'application/json': { schema: ProfileUpdateResponseSchema } }
+    },
+    401: {
+      description: '認証エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    },
+    400: {
+      description: 'エラー',
+      content: { 'application/json': { schema: ErrorSchema } }
+    }
+  }
+})
+
+app.openapi(updateProfileRoute, async (c) => {
+  const authHeader = c.req.header('Authorization')
+  const { user, error: authError } = await verifyAuth(authHeader)
+  
+  if (authError || !user) {
+    return c.json({ error: authError || 'Unauthorized' }, 401)
+  }
+
+  const { name, bio } = c.req.valid('json')
+  const supabase = createAuthenticatedClient(authHeader)
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ name, bio })
+    .eq('id', user.id)
+    .select()
     .single()
 
   if (error) {
@@ -250,41 +419,44 @@ app.get('/api/profile', authMiddleware, async (c) => {
   }
 
   return c.json({
+    message: 'Profile updated successfully',
     profile: data,
   })
 })
 
-// プロフィール更新（認証必須）
-app.put('/api/profile', authMiddleware, async (c) => {
-  const user = c.get('user')
-  const supabase = createAuthenticatedClient(c)
+// --- OpenAPI ドキュメント ---
 
-  try {
-    const { name, bio } = await c.req.json<{ name?: string; bio?: string }>()
+app.doc('/openapi.json', {
+  openapi: '3.0.0',
+  info: {
+    title: 'Hono API',
+    version: '1.0.0',
+    description: 'Hono + Supabase Demo API'
+  },
+  servers: [
+    { url: 'http://localhost:8787', description: 'Local' }
+  ],
+  security: [{ Bearer: [] }]
+})
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ name, bio })
-      .eq('id', user?.id)
-      .select()
-      .single()
+app.openAPIRegistry.registerComponent('securitySchemes', 'Bearer', {
+  type: 'http',
+  scheme: 'bearer',
+  bearerFormat: 'JWT'
+})
 
-    if (error) {
-      return c.json({ error: error.message }, 400)
-    }
+// Swagger UI
+app.get('/docs', swaggerUI({ url: '/openapi.json' }))
 
-    return c.json({
-      message: 'Profile updated successfully',
-      profile: data,
-    })
-  } catch (error) {
-    return c.json({ error: 'Invalid request body' }, 400)
-  }
+// ルート
+app.get('/', (c) => {
+  return c.json({ message: 'Hono API Server is running!' })
 })
 
 const port = 8787
-const hostname = '0.0.0.0'  // 外部からのアクセスを許可
+const hostname = '0.0.0.0'
 console.log(`🔥 Hono server is running on http://${hostname}:${port}`)
+console.log(`📚 API Docs: http://localhost:${port}/docs`)
 
 serve({
   fetch: app.fetch,

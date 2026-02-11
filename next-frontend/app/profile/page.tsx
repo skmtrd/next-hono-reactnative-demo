@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { client, createAuthHeaders } from '@/lib/api-client'
 import { User } from '@supabase/supabase-js'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
 type Profile = {
   id: string
@@ -47,15 +46,16 @@ export default function ProfilePage() {
     if (!session) return
 
     try {
-      const res = await fetch(`${API_BASE}/api/profile`, {
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-      })
-      const data = await res.json()
+      const headers = createAuthHeaders(session.access_token)
+      const { data, error } = await client.GET('/api/profile', { headers })
       
-      if (data.profile) {
-        setProfile(data.profile)
+      if (error) {
+        console.error('Failed to fetch profile:', error)
+        return
+      }
+      
+      if (data?.profile) {
+        setProfile(data.profile as Profile)
         setName(data.profile.name || '')
         setBio(data.profile.bio || '')
       }
@@ -72,22 +72,17 @@ export default function ProfilePage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
 
-      const res = await fetch(`${API_BASE}/api/profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ name, bio }),
+      const headers = createAuthHeaders(session.access_token)
+      const { data, error } = await client.PUT('/api/profile', {
+        headers,
+        body: { name, bio },
       })
 
-      const data = await res.json()
-
-      if (res.ok) {
-        setProfile(data.profile)
+      if (error) {
+        setMessage({ type: 'error', text: (error as { error?: string }).error || '保存に失敗しました' })
+      } else if (data) {
+        setProfile(data.profile as Profile)
         setMessage({ type: 'success', text: 'プロフィールを保存しました' })
-      } else {
-        setMessage({ type: 'error', text: data.error || '保存に失敗しました' })
       }
     } catch (error) {
       setMessage({ type: 'error', text: 'エラーが発生しました' })
