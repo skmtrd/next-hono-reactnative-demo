@@ -6,7 +6,9 @@
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:frontend\"",
     "dev:api": "npm run dev --prefix hono-api",
     "dev:frontend": "npm run dev --prefix next-frontend",
-    "install:all": "npm install --prefix hono-api && npm install --prefix next-frontend"
+    "dev:native": "npm start --prefix react-native-app",
+    "dev:native:web": "npm run web --prefix react-native-app",
+    "install:all": "npm install --prefix hono-api && npm install --prefix next-frontend && npm install --prefix react-native-app"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"

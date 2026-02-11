@@ -18,12 +18,11 @@ type Variables = {
 
 const app = new Hono<{ Variables: Variables }>()
 
-// CORSを有効化（Next.jsからのリクエストを許可）
+// CORSを有効化（開発環境では全てのオリジンを許可）
 app.use('/*', cors({
-  origin: 'http://localhost:3000',
+  origin: '*',  // 本番環境では特定のオリジンのみ許可すること
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
 }))
 
 // 認証ミドルウェア（保護されたルート用）
@@ -223,9 +222,11 @@ app.get('/api/protected/data', authMiddleware, (c) => {
 })
 
 const port = 8787
-console.log(`🔥 Hono server is running on http://localhost:${port}`)
+const hostname = '0.0.0.0'  // 外部からのアクセスを許可
+console.log(`🔥 Hono server is running on http://${hostname}:${port}`)
 
 serve({
   fetch: app.fetch,
-  port
+  port,
+  hostname,
 })
